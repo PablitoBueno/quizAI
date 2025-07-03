@@ -1,15 +1,7 @@
-# Notebook: Quiz Interativo com Google Gemini no Colab
-"""
-Instruções:
-1. Abra um notebook no Google Colab.
-2. No painel Secrets, crie "GEMINI_API_KEY" com sua chave.
-3. Execute esta célula e as seguintes.
-"""
 
-# Instalação de dependências
+# Instalação
 !pip install --upgrade google-generativeai ipywidgets --quiet
 
-# Imports e configuração da API
 import google.generativeai as genai
 import ipywidgets as widgets
 from IPython.display import display, clear_output
@@ -17,113 +9,118 @@ import re
 from google.colab import userdata
 
 # Configuração da API Key
-try:
-    api_key = userdata.get('GEMINI_API_KEY')
-    genai.configure(api_key=api_key)
-except Exception:
-    print('❌ Erro ao configurar API Key')
+api_key = userdata.get('GEMINI_API_KEY')
+genai.configure(api_key=api_key)
 
-# Funções de geração e parser de perguntas
-
+# Gera 10 perguntas apenas textuais
 def gerar_perguntas(nivel, materia):
     prompt = f"""
-Instrução: Gere 5 perguntas de múltipla escolha.
-Nível: {nivel}
-Matéria: {materia}
-Formato:
-Pergunta X: texto
-A) ...
-B) ...
-C) ...
-D) ...
-Resposta correta: <letra>
+Você é um tutor que cria quizzes educativos de texto.
+Não inclua imagens ou mídias — apenas perguntas baseadas em texto.
+Nível: {nivel} (dificuldade adequada).
+Matéria: {materia} (conteúdo apropriado).
+
+Instruções:
+- Gere exatamente 10 questões de múltipla escolha de texto.
+- Formato:
+  Pergunta X: <texto>
+  A) ...
+  B) ...
+  C) ...
+  D) ...
+  Resposta correta: <letra>
+- Separe cada bloco com linha em branco.
+
+Evite ambiguidade para respostas claras e unívocas.
 """
     model = genai.GenerativeModel('gemini-1.5-flash-latest')
     r = model.generate_content(prompt)
-    return r.text if r.parts else ''
+    return r.text or ''
 
-
+# Extrai perguntas e alternativas
 def parse_perguntas(texto):
     blocos = re.findall(r'Pergunta \d+:.*?(?=Pergunta \d+:|\Z)', texto, re.DOTALL)
-    questoes = []
+    qs = []
     for b in blocos:
-        p = re.search(r'Pergunta \d+:\s*(.*?)\n', b).group(1)
-        alts = {m[0]:m[1] for m in re.findall(r'([A-D])\)\s*(.*?)\n', b)}
-        cor = re.search(r'Resposta correta:\s*([A-D])', b).group(1)
-        questoes.append({'pergunta': p, 'alternativas': alts, 'correta': cor})
-    return questoes
+        p = re.search(r'Pergunta \d+:\s*(.*?)\n', b).group(1).strip()
+        alts = {letra: texto.strip() for letra, texto in re.findall(r'([A-D])\)\s*(.*?)\n', b)}
+        ans = re.search(r'Resposta correta:\s*([A-D])', b).group(1).upper()
+        qs.append({'p': p, 'alts': alts, 'ans': ans})
+    return qs
 
-# Definição de níveis e matérias
-niveis = ['Fundamental 1', 'Fundamental 2', 'Ensino Médio']
-materias = ['Matemática', 'História', 'Ciências']
+# Definições de níveis e matérias
+niveis = ['Fundamental 1','Fundamental 2','Ensino Médio 1','Ensino Médio 2','Ensino Médio 3']
+mats = {
+    'Fundamental 1': ['Ciências','Matemática','Astronomia'],
+    'Fundamental 2': ['Ciências','Matemática','Astronomia'],
+    'Ensino Médio 1': ['Química','Física','Biologia','Matemática','Astronomia'],
+    'Ensino Médio 2': ['Química','Física','Biologia','Matemática','Astronomia'],
+    'Ensino Médio 3': ['Química','Física','Biologia','Matemática','Astronomia']
+}
 
 # Widgets iniciais
-dropdown_nivel = widgets.Dropdown(options=niveis, description='Nível:')
-dropdown_materia = widgets.Dropdown(options=materias, description='Matéria:')
-botao_iniciar = widgets.Button(description='Iniciar Quiz', button_style='primary')
-display(dropdown_nivel, dropdown_materia, botao_iniciar)
+dd_n = widgets.Dropdown(options=niveis, description='Nível:')
+dd_m = widgets.Dropdown(options=mats[niveis[0]], description='Matéria:')
+bt_start = widgets.Button(description='Iniciar Quiz', button_style='primary')
+display(dd_n, dd_m, bt_start)
 
-# Estado do quiz
-tela = {'questoes': [], 'index': 0, 'score': 0}
+# Ajusta matérias conforme nível
+def on_nivel_change(change):
+    dd_m.options = mats[change['new']]
+dd_n.observe(on_nivel_change, names='value')
 
-# Função para iniciar quiz
-def iniciar_quiz(b):
+estado = {'qs': [], 'i': 0, 'score': 0}
+
+# Inicia quiz
+def iniciar(b):
     clear_output()
-    nivel = dropdown_nivel.value
-    materia = dropdown_materia.value
-    texto = gerar_perguntas(nivel, materia)
-    tela['questoes'] = parse_perguntas(texto)
-    tela['index'] = 0
-    tela['score'] = 0
-    mostrar_questao()
+    texto = gerar_perguntas(dd_n.value, dd_m.value)
+    qs = parse_perguntas(texto)
+    estado.update(qs=qs, i=0, score=0)
+    mostrar()
+bt_start.on_click(iniciar)
 
-botao_iniciar.on_click(iniciar_quiz)
-
-# Função para exibir pergunta
-
-def mostrar_questao():
+# Exibe perguntas
+def mostrar():
     clear_output()
-    q = tela['questoes'][tela['index']]
-    print(f"Pergunta {tela['index']+1}/{len(tela['questoes'])}: {q['pergunta']}")
-    radios = widgets.RadioButtons(options=[f"{k}) {v}" for k, v in q['alternativas'].items()])
-    botao_resp = widgets.Button(description='Responder', button_style='success', disabled=True)
-    botao_next = widgets.Button(description='Próxima', button_style='info', disabled=True)
-    display(radios, botao_resp, botao_next)
+    q = estado['qs'][estado['i']]
+    print(f"{estado['i']+1}/{len(estado['qs'])}: {q['p']}")
+    radios = widgets.RadioButtons(
+        options=[f"{k}) {v}" for k, v in q['alts'].items()],
+        description='',
+        layout={'width':'auto'}
+    )
+    btn_r = widgets.Button(description='Responder', button_style='success', disabled=True)
+    btn_n = widgets.Button(description='Próxima', button_style='info', disabled=True)
+    out = widgets.Output()
+    display(radios, btn_r, btn_n, out)
 
-    # Habilita botão responder ao selecionar alternativa
-    radios.observe(lambda change: setattr(botao_resp, 'disabled', False), names='value')
+    radios.observe(lambda c: setattr(btn_r, 'disabled', False), names='value')
 
-    # Ação ao responder
-    def on_responder(_):
-        resposta = radios.value.split(')')[0]
-        if resposta == q['correta']:
-            print('✅ Correto!')
-            tela['score'] += 1
-        else:
-            print(f"❌ Errado. A resposta certa era {q['correta']}) {q['alternativas'][q['correta']]}" )
-        botao_resp.disabled = True
-        radios.disabled = True
-        botao_next.disabled = False
+    def on_resp(_):
+        with out:
+            clear_output()
+            escolha = radios.value.split(')')[0].strip().upper()
+            correta = q['ans']
+            if escolha == correta:
+                print('✅ Correto!'); estado['score'] += 1
+            else:
+                print(f'❌ Errado! Resposta certa: {correta}) {q["alts"][correta]}')
+        btn_r.disabled, radios.disabled, btn_n.disabled = True, True, False
+    btn_r.on_click(on_resp)
 
-    botao_resp.on_click(on_responder)
+    def on_next(_):
+        estado['i'] += 1
+        if estado['i'] < len(estado['qs']): mostrar()
+        else: fim()
+    btn_n.on_click(on_next)
 
-    # Ação ao próxima
-    def on_proxima(_):
-        tela['index'] += 1
-        if tela['index'] < len(tela['questoes']):
-            mostrar_questao()
-        else:
-            mostrar_resultado()
-
-    botao_next.on_click(on_proxima)
-
-# Função para exibir resultado
-
-def mostrar_resultado():
+# Fim do quiz
+def fim():
     clear_output()
-    total = len(tela['questoes'])
-    acert = tela['score']
-    print(f"Quiz finalizado! Você acertou {acert}/{total} ({acert/total*100:.1f}%).")
-    botao_reset = widgets.Button(description='Reiniciar Quiz')
-    botao_reset.on_click(lambda _: (clear_output(), display(dropdown_nivel, dropdown_materia, botao_iniciar)))
-    display(botao_reset)
+    tot, ac = len(estado['qs']), estado['score']
+    pct = (ac/tot*100) if tot else 0
+    print(f"Quiz finalizado! Acertos: {ac}/{tot} ({pct:.1f}%)")
+    btn_reset = widgets.Button(description='Reiniciar Quiz', button_style='warning')
+    btn_reset.on_click(lambda _: (clear_output(), display(dd_n, dd_m, bt_start)))
+    display(btn_reset)
