@@ -1,4 +1,3 @@
-
 # Instalação
 !pip install --upgrade google-generativeai ipywidgets --quiet
 
